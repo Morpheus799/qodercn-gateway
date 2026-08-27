@@ -19,7 +19,7 @@ import (
 
 	"qodercn-gateway/internal/remote"
 	"qodercn-gateway/internal/service"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 	"qodercn-gateway/internal/version"
 )
 
@@ -1412,7 +1412,7 @@ func stripAnthropicHostedWebSearchTool(raw any) any {
 	for _, item := range items {
 		if m, ok := item.(map[string]any); ok &&
 			strings.TrimSpace(stringFromAny(m["name"])) == "web_search" &&
-			toolemulation.IsAnthropicHostedToolType(stringFromAny(m["type"])) {
+			tooltypes.IsAnthropicHostedToolType(stringFromAny(m["type"])) {
 			continue
 		}
 		kept = append(kept, item)
@@ -1485,7 +1485,7 @@ func hasAnthropicHostedWebSearchTool(raw any) bool {
 			continue
 		}
 		if strings.TrimSpace(stringFromAny(m["name"])) == "web_search" &&
-			toolemulation.IsAnthropicHostedToolType(stringFromAny(m["type"])) {
+			tooltypes.IsAnthropicHostedToolType(stringFromAny(m["type"])) {
 			return true
 		}
 	}
@@ -1530,16 +1530,16 @@ func normalizeAnthropicRequest(req anthropicRequest) (service.ChatRequest, error
 		return service.ChatRequest{}, fmt.Errorf("no user or assistant messages found")
 	}
 
-	toolChoice := toolemulation.ToolChoice{Mode: "auto"}
+	toolChoice := tooltypes.ToolChoice{Mode: "auto"}
 	if req.ToolChoice != nil {
-		toolChoice = toolemulation.ExtractAnthropicToolChoice(req.ToolChoice)
+		toolChoice = tooltypes.ExtractAnthropicToolChoice(req.ToolChoice)
 	}
 
 	return service.ChatRequest{
 		Model:           strings.TrimSpace(req.Model),
 		System:          strings.TrimSpace(extractText(req.System)),
 		Messages:        messages,
-		Tools:           toolemulation.ExtractAnthropicTools(req.Tools),
+		Tools:           tooltypes.ExtractAnthropicTools(req.Tools),
 		ToolChoice:      toolChoice,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
@@ -1594,8 +1594,8 @@ func normalizeOpenAIRequest(req openAIChatRequest) (service.ChatRequest, error) 
 		Model:             strings.TrimSpace(req.Model),
 		System:            strings.Join(systemParts, "\n\n"),
 		Messages:          messages,
-		Tools:             toolemulation.ExtractTools(req.Tools),
-		ToolChoice:        toolemulation.ExtractToolChoice(req.ToolChoice),
+		Tools:             tooltypes.ExtractTools(req.Tools),
+		ToolChoice:        tooltypes.ExtractToolChoice(req.ToolChoice),
 		ParallelToolCalls: req.ParallelToolCalls,
 		Temperature:       req.Temperature,
 		TopP:              req.TopP,
@@ -2115,11 +2115,11 @@ func (s *Server) release() {
 	}
 }
 
-func extractOpenAIToolCalls(raw []any) []toolemulation.ToolCall {
+func extractOpenAIToolCalls(raw []any) []tooltypes.ToolCall {
 	if len(raw) == 0 {
 		return nil
 	}
-	out := make([]toolemulation.ToolCall, 0, len(raw))
+	out := make([]tooltypes.ToolCall, 0, len(raw))
 	for _, item := range raw {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -2139,7 +2139,7 @@ func extractOpenAIToolCalls(raw []any) []toolemulation.ToolCall {
 		if argsRaw != "" {
 			_ = json.Unmarshal([]byte(argsRaw), &args)
 		}
-		out = append(out, toolemulation.ToolCall{
+		out = append(out, tooltypes.ToolCall{
 			ID:        id,
 			Name:      name,
 			Arguments: args,
@@ -2208,12 +2208,12 @@ func extractAnthropicUserContent(content any) (string, []anthropicToolResult) {
 	return text, results
 }
 
-func extractAnthropicAssistantContent(content any) (string, string, []toolemulation.ToolCall) {
+func extractAnthropicAssistantContent(content any) (string, string, []tooltypes.ToolCall) {
 	items, ok := content.([]any)
 	if !ok {
 		return extractText(content), "", nil
 	}
-	calls := make([]toolemulation.ToolCall, 0, len(items))
+	calls := make([]tooltypes.ToolCall, 0, len(items))
 	var textParts []string
 	var reasoningParts []string
 	for _, item := range items {
@@ -2250,7 +2250,7 @@ func extractAnthropicAssistantContent(content any) (string, string, []toolemulat
 					args = map[string]any{}
 				}
 			}
-			calls = append(calls, toolemulation.ToolCall{
+			calls = append(calls, tooltypes.ToolCall{
 				ID:        id,
 				Name:      name,
 				Arguments: args,

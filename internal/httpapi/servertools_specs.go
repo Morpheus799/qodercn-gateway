@@ -1,6 +1,6 @@
 package httpapi
 
-import "qodercn-gateway/internal/toolemulation"
+import "qodercn-gateway/internal/tooltypes"
 
 // Model-facing tool descriptions taken verbatim from the QoderCN CLI so the
 // proxy's advertised "server tools" behave the way that CLI's do.
@@ -100,8 +100,8 @@ func (t serverToolSpec) anthropicDef() map[string]any {
 
 // toolDef renders the spec as a service-layer ToolDef, used on the OpenAI path
 // where the agentic loop operates on the normalized service.ChatRequest.
-func (t serverToolSpec) toolDef() toolemulation.ToolDef {
-	return toolemulation.ToolDef{
+func (t serverToolSpec) toolDef() tooltypes.ToolDef {
+	return tooltypes.ToolDef{
 		Name:        t.name,
 		Description: t.description,
 		InputSchema: t.schema,

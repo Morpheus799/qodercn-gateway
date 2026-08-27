@@ -1,4 +1,4 @@
-package toolemulation
+package tooltypes
 
 import "testing"
 

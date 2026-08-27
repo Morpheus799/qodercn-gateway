@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 func TestNewKeepsZeroTimeoutUnlimited(t *testing.T) {
@@ -221,7 +221,7 @@ func TestBuildBodyProjectsNativeTools(t *testing.T) {
 	body, err := client.buildBody("req-1", ChatRequest{
 		Model:  "kmodel",
 		Prompt: "read file",
-		Tools: []toolemulation.ToolDef{{
+		Tools: []tooltypes.ToolDef{{
 			Name:        "read_file",
 			Description: "Read a local file",
 			InputSchema: map[string]any{
@@ -232,7 +232,7 @@ func TestBuildBodyProjectsNativeTools(t *testing.T) {
 				"required": []any{"file_path"},
 			},
 		}},
-		ToolChoice: toolemulation.ToolChoice{Mode: "tool", Name: "read_file"},
+		ToolChoice: tooltypes.ToolChoice{Mode: "tool", Name: "read_file"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestBuildBodyPreservesStructuredToolMessages(t *testing.T) {
 		Prompt: "fallback prompt",
 		Messages: []Message{
 			{Role: "user", Content: "查看项目"},
-			{Role: "assistant", ToolCalls: []toolemulation.ToolCall{{
+			{Role: "assistant", ToolCalls: []tooltypes.ToolCall{{
 				ID:        "call_1",
 				Name:      "Bash",
 				Arguments: map[string]any{"command": "pwd && ls -la"},

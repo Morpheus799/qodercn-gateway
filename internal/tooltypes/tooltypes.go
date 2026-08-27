@@ -1,9 +1,9 @@
-// Package toolemulation holds the shared tool data types (ToolDef / ToolChoice /
+// Package tooltypes holds the shared tool data types (ToolDef / ToolChoice /
 // ToolCall) and the request-side extractors that build them from OpenAI- and
 // Anthropic-shaped JSON. The gateway supports native function-calling, so the
 // historical prompt-injection / action-block emulation engine has been removed;
 // only these types and extractors remain.
-package toolemulation
+package tooltypes
 
 import (
 	"encoding/json"

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"qodercn-gateway/internal/service"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 // OpenAI-side server-tool injection. Mirrors the Anthropic path (media_tools.go)
@@ -33,8 +33,8 @@ func injectOpenAIServerTools(req service.ChatRequest) service.ChatRequest {
 }
 
 // stripServerToolDefs removes our injected server tools, leaving client tools.
-func stripServerToolDefs(tools []toolemulation.ToolDef) []toolemulation.ToolDef {
-	kept := make([]toolemulation.ToolDef, 0, len(tools))
+func stripServerToolDefs(tools []tooltypes.ToolDef) []tooltypes.ToolDef {
+	kept := make([]tooltypes.ToolDef, 0, len(tools))
 	for _, t := range tools {
 		if isServerTool(t.Name) {
 			continue
@@ -100,7 +100,7 @@ func (s *Server) handleOpenAIServerTools(w http.ResponseWriter, r *http.Request,
 
 // appendOpenAIToolTurn appends the assistant tool_use turn and the executed
 // tool-role results to req, stripping our tools on the last round to force an answer.
-func (s *Server) appendOpenAIToolTurn(ctx context.Context, req service.ChatRequest, result *service.ChatResult, ours []toolemulation.ToolCall, lastRound bool) service.ChatRequest {
+func (s *Server) appendOpenAIToolTurn(ctx context.Context, req service.ChatRequest, result *service.ChatResult, ours []tooltypes.ToolCall, lastRound bool) service.ChatRequest {
 	req.Messages = append(req.Messages, service.ChatMessage{
 		Role:      "assistant",
 		Text:      result.Text,

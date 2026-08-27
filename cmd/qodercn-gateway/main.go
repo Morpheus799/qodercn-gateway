@@ -167,18 +167,43 @@ func loadConfig() (service.Config, string) {
 	return cfg, configPath
 }
 
+// maxAuthKeyLen bounds an inbound API key's length.
+const maxAuthKeyLen = 50
+
+// validateAuthKey rejects inbound keys that could cause client-compatibility
+// issues: keys are capped at maxAuthKeyLen and restricted to characters that
+// survive HTTP header transport unambiguously across clients — letters, digits,
+// and - _ * + =.
+func validateAuthKey(key string) error {
+	if len(key) > maxAuthKeyLen {
+		return fmt.Errorf("key is %d chars; max is %d", len(key), maxAuthKeyLen)
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		ok := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '*' || c == '+' || c == '='
+		if !ok {
+			return fmt.Errorf("unsupported character %q; allowed: A-Z a-z 0-9 - _ * + =", c)
+		}
+	}
+	return nil
+}
+
 // loadAuthKeys reads an inbound API-key allowlist: one key per line, blank lines
-// and lines beginning with '#' ignored.
+// and lines beginning with '#' ignored. Every key must pass validateAuthKey.
 func loadAuthKeys(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	var keys []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for i, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		if err := validateAuthKey(line); err != nil {
+			return nil, fmt.Errorf("line %d: %w", i+1, err)
 		}
 		keys = append(keys, line)
 	}

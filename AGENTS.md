@@ -22,7 +22,7 @@ go run ./cmd/qodercn-gateway --port 8095
 - `internal/remote/` — QoderCN Remote API client: cosy request signing, SSE
   chat, image search/gen, credential loading
 - `internal/service/` — request orchestration (prompt build, streaming, output limiter)
-- `internal/toolemulation/` — shared tool data types + request-side extractors
+- `internal/tooltypes/` — shared tool data types + request-side extractors
 - `internal/deploy/` — credential / server-bundle export
 
 ## Conventions

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"qodercn-gateway/internal/remote"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 type SessionMode string
@@ -48,7 +48,7 @@ type ChatMessage struct {
 	Text       string
 	Images     []Image
 	ToolCallID string
-	ToolCalls  []toolemulation.ToolCall
+	ToolCalls  []tooltypes.ToolCall
 	// ReasoningText carries an assistant turn's prior thinking so extended
 	// thinking survives multi-turn round-trips (forwarded as reasoning_content).
 	ReasoningText string
@@ -58,8 +58,8 @@ type ChatRequest struct {
 	Model             string
 	System            string
 	Messages          []ChatMessage
-	Tools             []toolemulation.ToolDef
-	ToolChoice        toolemulation.ToolChoice
+	Tools             []tooltypes.ToolDef
+	ToolChoice        tooltypes.ToolChoice
 	ParallelToolCalls *bool
 
 	// Generation parameters (passed through for API compatibility; the gateway
@@ -102,7 +102,7 @@ type ChatResult struct {
 	Endpoint         string
 	Transport        string
 	EffectiveSession SessionMode
-	ToolCalls        []toolemulation.ToolCall
+	ToolCalls        []tooltypes.ToolCall
 }
 
 type StreamEvent struct {
@@ -417,7 +417,7 @@ func (s *Service) chatOnce(
 			MaxTokens:       req.MaxTokens,
 			ReasoningEffort: req.ReasoningEffort,
 			Tools:           req.Tools,
-			ToolChoice:      toolemulation.ToolChoice{Mode: "any"},
+			ToolChoice:      tooltypes.ToolChoice{Mode: "any"},
 		}, nil)
 		if retryErr == nil && len(retryResult.ToolCalls) > 0 {
 			remoteResult = retryResult

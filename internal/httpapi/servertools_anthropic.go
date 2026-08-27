@@ -10,7 +10,7 @@ import (
 
 	"qodercn-gateway/internal/remote"
 	"qodercn-gateway/internal/service"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 // Server-side tool injection: the proxy advertises gateway-only tools and runs
@@ -86,7 +86,7 @@ func stripInjectedServerTools(raw any) any {
 	return kept
 }
 
-func partitionServerToolCalls(calls []toolemulation.ToolCall) (ours, others []toolemulation.ToolCall) {
+func partitionServerToolCalls(calls []tooltypes.ToolCall) (ours, others []tooltypes.ToolCall) {
 	for _, c := range calls {
 		if isServerTool(c.Name) {
 			ours = append(ours, c)
@@ -107,7 +107,7 @@ func argBool(args map[string]any, key string, def bool) bool {
 }
 
 // executeServerTool runs one injected tool call and returns its result as text.
-func (s *Server) executeServerTool(ctx context.Context, call toolemulation.ToolCall) string {
+func (s *Server) executeServerTool(ctx context.Context, call tooltypes.ToolCall) string {
 	switch call.Name {
 	case webSearchToolName:
 		query := strings.TrimSpace(stringFromAny(call.Arguments["query"]))
@@ -160,7 +160,7 @@ func (s *Server) executeServerTool(ctx context.Context, call toolemulation.ToolC
 
 // foldServerToolResults runs our server tools and formats their results as text
 // to fold into the assistant message at hand-off (the client echoes it back).
-func (s *Server) foldServerToolResults(ctx context.Context, ours []toolemulation.ToolCall) string {
+func (s *Server) foldServerToolResults(ctx context.Context, ours []tooltypes.ToolCall) string {
 	var b strings.Builder
 	for _, c := range ours {
 		label := strings.TrimSuffix(c.Name, serverToolSuffix)
@@ -283,7 +283,7 @@ func (s *Server) handleAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 
 // appendServerToolTurn appends the assistant tool_use turn and the executed
 // tool_result turn to req, stripping our tools on the last round to force an answer.
-func (s *Server) appendServerToolTurn(ctx context.Context, req anthropicRequest, result *service.ChatResult, ours []toolemulation.ToolCall, lastRound bool) anthropicRequest {
+func (s *Server) appendServerToolTurn(ctx context.Context, req anthropicRequest, result *service.ChatResult, ours []tooltypes.ToolCall, lastRound bool) anthropicRequest {
 	assistantContent := make([]any, 0, len(ours)+1)
 	if strings.TrimSpace(result.Text) != "" {
 		assistantContent = append(assistantContent, map[string]any{"type": "text", "text": result.Text})

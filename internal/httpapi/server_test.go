@@ -14,7 +14,7 @@ import (
 
 	"qodercn-gateway/internal/remote"
 	"qodercn-gateway/internal/service"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 func TestNormalizeOpenAIRequestCollectsSystemMessages(t *testing.T) {
@@ -266,7 +266,7 @@ func TestInjectAnthropicServerToolsReplacesHostedWebSearch(t *testing.T) {
 		m, _ := it.(map[string]any)
 		name := stringFromAny(m["name"])
 		switch {
-		case name == "web_search" && toolemulation.IsAnthropicHostedToolType(stringFromAny(m["type"])):
+		case name == "web_search" && tooltypes.IsAnthropicHostedToolType(stringFromAny(m["type"])):
 			hosted++
 		case name == webSearchToolName:
 			callable++
@@ -311,7 +311,7 @@ func TestServerToolUsageAccumulatesAcrossRounds(t *testing.T) {
 
 func TestInjectOpenAIServerToolsSuffixedNoCollision(t *testing.T) {
 	// A client tool named "web_search" must not collide with our suffixed one.
-	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "web_search"}}}
+	req := service.ChatRequest{Tools: []tooltypes.ToolDef{{Name: "web_search"}}}
 	out := injectOpenAIServerTools(req)
 	var clientWeb, web, img, polish int
 	for _, tool := range out.Tools {
@@ -367,7 +367,7 @@ func TestToolStreamFilterStreamsNormalTextWithTools(t *testing.T) {
 
 func TestShouldAggregateToolStreamRequiresOptIn(t *testing.T) {
 	t.Setenv("QODERCN_AGGREGATE_TOOL_STREAM", "")
-	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "Bash"}}}
+	req := service.ChatRequest{Tools: []tooltypes.ToolDef{{Name: "Bash"}}}
 	if shouldAggregateToolStream(req) {
 		t.Fatal("tool streams should remain incremental by default")
 	}
@@ -413,7 +413,7 @@ func TestParseImageURLRejectsLocalPaths(t *testing.T) {
 }
 
 func TestOpenAIFinishReason(t *testing.T) {
-	tool := []toolemulation.ToolCall{{}}
+	tool := []tooltypes.ToolCall{{}}
 	cases := []struct {
 		name   string
 		result service.ChatResult
@@ -437,7 +437,7 @@ func TestOpenAIFinishReason(t *testing.T) {
 }
 
 func TestAnthropicStopReason(t *testing.T) {
-	tool := []toolemulation.ToolCall{{}}
+	tool := []tooltypes.ToolCall{{}}
 	cases := []struct {
 		name    string
 		result  service.ChatResult
@@ -614,13 +614,13 @@ func runAnthropicStream(req service.ChatRequest, events []service.StreamEvent, f
 }
 
 func TestWriteAnthropicStreamBodyIncrementalToolUse(t *testing.T) {
-	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "read_file"}}}
+	req := service.ChatRequest{Tools: []tooltypes.ToolDef{{Name: "read_file"}}}
 	events := []service.StreamEvent{
 		{Type: service.StreamEventToolCall, ToolCall: &service.StreamToolCall{Index: 0, ID: "call_1", Name: "read_file"}},
 		{Type: service.StreamEventToolCall, ToolCall: &service.StreamToolCall{Index: 0, ArgsFragment: `{"path":`}},
 		{Type: service.StreamEventToolCall, ToolCall: &service.StreamToolCall{Index: 0, ArgsFragment: `"/a.txt"}`}},
 	}
-	final := &service.ChatResult{ToolCalls: []toolemulation.ToolCall{{ID: "call_1", Name: "read_file", Arguments: map[string]any{"path": "/a.txt"}}}, FinishReason: "tool_calls"}
+	final := &service.ChatResult{ToolCalls: []tooltypes.ToolCall{{ID: "call_1", Name: "read_file", Arguments: map[string]any{"path": "/a.txt"}}}, FinishReason: "tool_calls"}
 	recs := parseAnthropicSSE(t, runAnthropicStream(req, events, final, false))
 
 	starts, stops := 0, 0
@@ -660,11 +660,11 @@ func TestWriteAnthropicStreamBodyIncrementalToolUse(t *testing.T) {
 }
 
 func TestWriteAnthropicStreamBodyToolLateStart(t *testing.T) {
-	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "x"}}}
+	req := service.ChatRequest{Tools: []tooltypes.ToolDef{{Name: "x"}}}
 	events := []service.StreamEvent{
 		{Type: service.StreamEventToolCall, ToolCall: &service.StreamToolCall{Index: 0, ArgsFragment: `{"a":1}`}},
 	}
-	final := &service.ChatResult{ToolCalls: []toolemulation.ToolCall{{}}, FinishReason: "tool_calls"}
+	final := &service.ChatResult{ToolCalls: []tooltypes.ToolCall{{}}, FinishReason: "tool_calls"}
 	recs := parseAnthropicSSE(t, runAnthropicStream(req, events, final, false))
 	startIdx := -1
 	var gotID, gotName, args string
@@ -690,8 +690,8 @@ func TestWriteAnthropicStreamBodyToolLateStart(t *testing.T) {
 }
 
 func TestWriteAnthropicStreamBodyEmulatedToolAggregated(t *testing.T) {
-	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "read_file"}}}
-	final := &service.ChatResult{ToolCalls: []toolemulation.ToolCall{{ID: "call_9", Name: "read_file", Arguments: map[string]any{"path": "/b"}}}, FinishReason: "tool_calls"}
+	req := service.ChatRequest{Tools: []tooltypes.ToolDef{{Name: "read_file"}}}
+	final := &service.ChatResult{ToolCalls: []tooltypes.ToolCall{{ID: "call_9", Name: "read_file", Arguments: map[string]any{"path": "/b"}}}, FinishReason: "tool_calls"}
 	recs := parseAnthropicSSE(t, runAnthropicStream(req, nil, final, false))
 	starts := 0
 	var gotID string
@@ -707,13 +707,13 @@ func TestWriteAnthropicStreamBodyEmulatedToolAggregated(t *testing.T) {
 }
 
 func TestWriteAnthropicStreamBodyThinkingTextToolCoexist(t *testing.T) {
-	req := service.ChatRequest{ReasoningEffort: "high", Tools: []toolemulation.ToolDef{{Name: "read_file"}}}
+	req := service.ChatRequest{ReasoningEffort: "high", Tools: []tooltypes.ToolDef{{Name: "read_file"}}}
 	events := []service.StreamEvent{
 		{Type: service.StreamEventThinking, Delta: "let me think about this"},
 		{Type: service.StreamEventText, Delta: "checking now for you"},
 		{Type: service.StreamEventToolCall, ToolCall: &service.StreamToolCall{Index: 0, ID: "call_1", Name: "read_file", ArgsFragment: `{}`}},
 	}
-	final := &service.ChatResult{ToolCalls: []toolemulation.ToolCall{{ID: "call_1", Name: "read_file"}}, FinishReason: "tool_calls"}
+	final := &service.ChatResult{ToolCalls: []tooltypes.ToolCall{{ID: "call_1", Name: "read_file"}}, FinishReason: "tool_calls"}
 	recs := parseAnthropicSSE(t, runAnthropicStream(req, events, final, false))
 	thinkingIdx, textIdx, toolIdx := -1, -1, -1
 	for _, r := range recs {

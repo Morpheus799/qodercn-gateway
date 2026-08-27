@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"qodercn-gateway/internal/remote"
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 func TestNewKeepsZeroTimeoutUnlimited(t *testing.T) {
@@ -51,8 +51,8 @@ func TestNormalizeRemoteModelMapsFriendlyNames(t *testing.T) {
 func TestEmulatesTextToolsAlwaysFalse(t *testing.T) {
 	svc := New(Config{})
 	req := ChatRequest{
-		Tools:      []toolemulation.ToolDef{{Name: "Bash"}},
-		ToolChoice: toolemulation.ToolChoice{Mode: "auto"},
+		Tools:      []tooltypes.ToolDef{{Name: "Bash"}},
+		ToolChoice: tooltypes.ToolChoice{Mode: "auto"},
 	}
 	if svc.EmulatesTextTools(req) {
 		t.Fatal("native gateway path must never emulate text tools")
@@ -62,7 +62,7 @@ func TestEmulatesTextToolsAlwaysFalse(t *testing.T) {
 func TestBuildLingmaPromptOmitsToolEmulation(t *testing.T) {
 	req := ChatRequest{
 		Messages: []ChatMessage{{Role: "user", Text: "查看项目结构"}},
-		Tools: []toolemulation.ToolDef{{
+		Tools: []tooltypes.ToolDef{{
 			Name: "Bash",
 			InputSchema: map[string]any{
 				"properties": map[string]any{
@@ -71,7 +71,7 @@ func TestBuildLingmaPromptOmitsToolEmulation(t *testing.T) {
 				"required": []any{"command"},
 			},
 		}},
-		ToolChoice: toolemulation.ToolChoice{Mode: "auto"},
+		ToolChoice: tooltypes.ToolChoice{Mode: "auto"},
 	}
 	prompt, err := buildLingmaPrompt(req)
 	if err != nil {
@@ -108,8 +108,8 @@ func TestBuildLingmaPromptIncludesReasoningHintOnlyWhenRequested(t *testing.T) {
 
 func TestShouldRetryRemoteNativeToolForContinuationText(t *testing.T) {
 	req := ChatRequest{
-		Tools: []toolemulation.ToolDef{{Name: "Bash"}},
-		ToolChoice: toolemulation.ToolChoice{
+		Tools: []tooltypes.ToolDef{{Name: "Bash"}},
+		ToolChoice: tooltypes.ToolChoice{
 			Mode: "auto",
 		},
 	}
@@ -119,7 +119,7 @@ func TestShouldRetryRemoteNativeToolForContinuationText(t *testing.T) {
 	if shouldRetryRemoteNativeTool(req, "这是一个 uni-app 项目，核心目录是 src。") {
 		t.Fatal("substantive answer should not trigger retry")
 	}
-	req.ToolChoice = toolemulation.ToolChoice{Mode: "none"}
+	req.ToolChoice = tooltypes.ToolChoice{Mode: "none"}
 	if shouldRetryRemoteNativeTool(req, "让我查看一下：") {
 		t.Fatal("tool_choice none should not trigger retry")
 	}
@@ -176,11 +176,11 @@ func TestRemoteMessagesFromRequestKeepsReasoningOnlyTurn(t *testing.T) {
 
 func TestRemoteMessagesFromRequestPreservesToolTurnsAndImages(t *testing.T) {
 	req := ChatRequest{
-		Tools:      []toolemulation.ToolDef{{Name: "get_image"}},
-		ToolChoice: toolemulation.ToolChoice{Mode: "auto"},
+		Tools:      []tooltypes.ToolDef{{Name: "get_image"}},
+		ToolChoice: tooltypes.ToolChoice{Mode: "auto"},
 		Messages: []ChatMessage{
 			{Role: "user", Text: "look at this"},
-			{Role: "assistant", ToolCalls: []toolemulation.ToolCall{{ID: "c1", Name: "get_image"}}},
+			{Role: "assistant", ToolCalls: []tooltypes.ToolCall{{ID: "c1", Name: "get_image"}}},
 			{Role: "tool", ToolCallID: "c1", Text: "here", Images: []Image{{MediaType: "image/png", Data: "abc"}}},
 		},
 	}

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"qodercn-gateway/internal/toolemulation"
+	"qodercn-gateway/internal/tooltypes"
 )
 
 const (
@@ -86,8 +86,8 @@ type ChatRequest struct {
 	Stop            []string
 	MaxTokens       int
 	ReasoningEffort string
-	Tools           []toolemulation.ToolDef
-	ToolChoice      toolemulation.ToolChoice
+	Tools           []tooltypes.ToolDef
+	ToolChoice      tooltypes.ToolChoice
 }
 
 type Image struct {
@@ -102,7 +102,7 @@ type Message struct {
 	Images        []Image
 	Name          string
 	ToolCallID    string
-	ToolCalls     []toolemulation.ToolCall
+	ToolCalls     []tooltypes.ToolCall
 	ReasoningText string
 }
 
@@ -120,7 +120,7 @@ type ChatResult struct {
 	FinishReason      string
 	RequestID         string
 	CredentialSrc     string
-	ToolCalls         []toolemulation.ToolCall
+	ToolCalls         []tooltypes.ToolCall
 }
 
 // StreamEvent is a single streamed delta from the remote chat endpoint.
@@ -1190,7 +1190,7 @@ func projectMessageContent(message Message) any {
 	return content
 }
 
-func projectMessageToolCalls(calls []toolemulation.ToolCall) []map[string]any {
+func projectMessageToolCalls(calls []tooltypes.ToolCall) []map[string]any {
 	if len(calls) == 0 {
 		return nil
 	}
@@ -1214,7 +1214,7 @@ func projectMessageToolCalls(calls []toolemulation.ToolCall) []map[string]any {
 	return out
 }
 
-func projectTools(tools []toolemulation.ToolDef) []map[string]any {
+func projectTools(tools []tooltypes.ToolDef) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -1240,7 +1240,7 @@ func projectTools(tools []toolemulation.ToolDef) []map[string]any {
 	return out
 }
 
-func projectToolChoice(choice toolemulation.ToolChoice) any {
+func projectToolChoice(choice tooltypes.ToolChoice) any {
 	switch choice.Mode {
 	case "none":
 		return "none"
@@ -1493,18 +1493,18 @@ func (b *remoteToolCallBuffer) Add(fragments []remoteToolCallFragment) {
 	}
 }
 
-func (b *remoteToolCallBuffer) Calls() []toolemulation.ToolCall {
+func (b *remoteToolCallBuffer) Calls() []tooltypes.ToolCall {
 	if b == nil || len(b.order) == 0 {
 		return nil
 	}
-	out := make([]toolemulation.ToolCall, 0, len(b.order))
+	out := make([]tooltypes.ToolCall, 0, len(b.order))
 	for _, index := range b.order {
 		state := b.states[index]
 		if state == nil || strings.TrimSpace(state.name) == "" {
 			continue
 		}
 		args := strings.TrimSpace(state.arguments.String())
-		call := toolemulation.ToolCall{
+		call := tooltypes.ToolCall{
 			ID:        strings.TrimSpace(state.id),
 			Name:      strings.TrimSpace(state.name),
 			Arguments: map[string]any{},
