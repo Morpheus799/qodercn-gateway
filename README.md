@@ -5,7 +5,7 @@
 OpenAI/Anthropic 兼容客户端可以直接接入 QoderCN 托管的模型（Qwen、Kimi、MiniMax、
 GLM、DeepSeek 等）。
 
-该项目是从[lingma-proxy]{https://github.com/Lutiancheng1/lingma-proxy}重构而来，去掉了gui和依赖本地环境的ipc模式，并优化了诸多原生工具、图片输入等内容。
+该项目是从[lingma-proxy](https://github.com/Lutiancheng1/lingma-proxy)重构而来，去掉了gui和依赖本地环境的ipc模式，并优化了诸多原生工具、图片输入等内容。
 
 ## 接口
 
