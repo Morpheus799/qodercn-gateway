@@ -16,3 +16,7 @@ coverage.*
 credentials.json
 qodercn-gateway.json
 auth-keys.txt
+
+# local-only tests & probes — kept on disk, not published to the remote repo
+*_test.go
+scripts/stream_probe.py
