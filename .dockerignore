@@ -1,0 +1,8 @@
+.git
+.github
+dist
+bin
+*.zip
+*.tar.gz
+*.log
+.venv

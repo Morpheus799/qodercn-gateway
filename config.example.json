@@ -1,0 +1,12 @@
+{
+  "host": "127.0.0.1",
+  "port": 8095,
+  "model": "kmodel",
+  "session_mode": "auto",
+  "timeout": 0,
+  "remote_base_url": "",
+  "remote_auth_file": "",
+  "remote_proxy_url": "",
+  "remote_version": "",
+  "auth_keys_file": ""
+}
