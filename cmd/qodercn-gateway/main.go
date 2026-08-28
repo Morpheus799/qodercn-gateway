@@ -168,7 +168,7 @@ func loadConfig() (service.Config, string) {
 }
 
 // maxAuthKeyLen bounds an inbound API key's length.
-const maxAuthKeyLen = 50
+const maxAuthKeyLen = 64
 
 // validateAuthKey rejects inbound keys that could cause client-compatibility
 // issues: keys are capped at maxAuthKeyLen and restricted to characters that

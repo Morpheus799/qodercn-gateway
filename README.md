@@ -42,7 +42,7 @@ go build -o qodercn-gateway ./cmd/qodercn-gateway
 `config.example.json`）、环境变量三种方式——优先级：命令行 > 环境变量 > 配置文件。
 常用项：`--remote-auth-file`、`--remote-base-url`、`--remote-proxy-url`、`--model`、
 `--auth-keys-file`（入站 API key 白名单，一行一个、`#` 注释；留空 = 开放访问）。
-每个入站 key 最长 50 字符，且只允许 `A-Z a-z 0-9 - _ * + =`（避免不同客户端的请求头兼容问题）；
+每个入站 key 最长 64 字符，且只允许 `A-Z a-z 0-9 - _ * + =`（避免不同客户端的请求头兼容问题）；
 不合规会在启动时直接报错拒绝运行。
 
 可选特性开关（环境变量）：
@@ -51,6 +51,10 @@ go build -o qodercn-gateway ./cmd/qodercn-gateway
   `web_search` / `ImageSearch` / `TextPolish` 工具（对客户端隐藏）。
 - `QODERCN_IMAGE_DEWATERMARK=1` —— 通过不可逆的几何去同步重编码，破坏生成图片中的
   鲁棒水印载荷（有效性未知）。
+- `QODERCN_REPLACE_WEB_SEARCH` —— 是否替换 Claude Code 的 hosted web_search（**默认开**）。
+  开启时拦截客户端声明的 hosted `web_search`，在网关侧执行，并以 Anthropic 原生
+  `server_tool_use` + `web_search_tool_result` 块返回，让 Claude Code 渲染自带的联网搜索 UI；
+  设为 `0`/`false`/`no`/`off` 关闭：不拦截，该 hosted 工具被丢弃、模型不联网搜索。
 
 ## Docker
 

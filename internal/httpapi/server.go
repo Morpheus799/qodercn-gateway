@@ -1401,6 +1401,21 @@ func truthyEnv(name string) bool {
 	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
+// falsyEnv reports whether name is explicitly set to a false-ish value, used for
+// flags that default ON (absent or unrecognized value => not disabled).
+func falsyEnv(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	return value == "0" || value == "false" || value == "no" || value == "off"
+}
+
+// replaceWebSearchEnabled reports whether to intercept a client's hosted
+// web_search and serve it via the gateway as native Anthropic server-tool blocks.
+// Defaults ON; set QODERCN_REPLACE_WEB_SEARCH to a false-ish value to disable
+// (the client's hosted web_search is then dropped and the model does not search).
+func replaceWebSearchEnabled() bool {
+	return !falsyEnv("QODERCN_REPLACE_WEB_SEARCH")
+}
+
 // stripAnthropicHostedWebSearchTool removes hosted web_search tool definitions
 // from the raw tools list, leaving client (function) tools intact.
 func stripAnthropicHostedWebSearchTool(raw any) any {

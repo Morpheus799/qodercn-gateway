@@ -33,10 +33,11 @@ func isServerTool(name string) bool {
 }
 
 // anthropicServerToolDefs returns which server tools to advertise: web_search if
-// the client declares a hosted web_search tool, the rest when injection is on.
+// the client declares a hosted web_search tool AND replacement is enabled
+// (QODERCN_REPLACE_WEB_SEARCH, default on), the rest when injection is on.
 func (s *Server) anthropicServerToolDefs(req anthropicRequest) ([]any, bool) {
 	var defs []any
-	if hasAnthropicHostedWebSearchTool(req.Tools) {
+	if replaceWebSearchEnabled() && hasAnthropicHostedWebSearchTool(req.Tools) {
 		defs = append(defs, webSearchSpec.anthropicDef())
 	}
 	if mediaToolsEnabled() {

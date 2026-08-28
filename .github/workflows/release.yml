@@ -1,13 +1,58 @@
 name: Release
 
+# Reads the VERSION file; if v<VERSION> has no tag yet, creates it and publishes
+# a release built from that tag. Bumping VERSION on main (or a manual dispatch)
+# is the release trigger; re-running with an unchanged VERSION is a no-op.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths: ["VERSION"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
+  tag:
+    name: Resolve version & tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      should_release: ${{ steps.v.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          set -euo pipefail
+          ver="$(tr -d '[:space:]' < VERSION)"
+          [ -n "$ver" ] || { echo "VERSION file is empty"; exit 1; }
+          tag="v$ver"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "tag $tag already exists — nothing to release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "will release $tag"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create and push tag
+        if: steps.v.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.v.outputs.tag }}" -m "Release ${{ steps.v.outputs.tag }}"
+          git push origin "${{ steps.v.outputs.tag }}"
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: tag
+    if: needs.tag.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,6 +63,8 @@ jobs:
           - { goos: windows, goarch: amd64, ext: ".exe" }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -25,26 +72,29 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VER: ${{ needs.tag.outputs.version }}
         run: |
           BIN="qodercn-gateway${{ matrix.ext }}"
-          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$BIN" ./cmd/qodercn-gateway
-          tar -C dist -czf "qodercn-gateway_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "$BIN"
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X qodercn-gateway/internal/version.Version=${VER}" \
+            -o "dist/$BIN" ./cmd/qodercn-gateway
+          tar -C dist -czf "qodercn-gateway_${{ needs.tag.outputs.tag }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "$BIN"
       - uses: actions/upload-artifact@v4
         with:
           name: qodercn-gateway-${{ matrix.goos }}-${{ matrix.goarch }}
           path: qodercn-gateway_*_*.tar.gz
 
   release:
-    needs: build
+    name: Publish release
+    needs: [tag, build]
+    if: needs.tag.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
           path: dist
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.tag.outputs.tag }}
           files: dist/*.tar.gz

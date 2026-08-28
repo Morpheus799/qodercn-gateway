@@ -5,7 +5,9 @@ FROM golang:1.23-alpine AS builder
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" -o /out/qodercn-gateway ./cmd/qodercn-gateway
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags "-s -w -X qodercn-gateway/internal/version.Version=$(tr -d '[:space:]' < VERSION)" \
+    -o /out/qodercn-gateway ./cmd/qodercn-gateway
 
 FROM alpine:3.21
 
