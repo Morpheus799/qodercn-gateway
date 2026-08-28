@@ -36,6 +36,14 @@ const (
 	// fallbackCosyVersion is used only when neither an explicit version nor the
 	// installed CLI's version.txt is available (matches the observed CLI value).
 	fallbackCosyVersion = "1.1.28"
+
+	// User-Agent strings that mimic the real QoderCN CLI's outbound traffic: the
+	// CLI is Bun-compiled, so its model-gateway (gateway.qoder.com.cn) calls carry
+	// Bun's default fetch UA, while account (openapi.qoder.com.cn) calls carry a
+	// branded UA. Both versions are pinned — we present as a client that never
+	// updates rather than leaking a proxy identity.
+	gatewayUserAgent = "Bun/1.3.14"
+	openapiUserAgent = "qoder/1.1.31"
 )
 
 var remoteBaseURLPattern = regexp.MustCompile(`https?://[^\s"'<>),\]}]+`)
@@ -333,6 +341,7 @@ func (c *Client) FetchQuota(ctx context.Context) (*Quota, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", openapiUserAgent)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -1295,7 +1304,7 @@ func (c *Client) headers(cred Credential, path string, body string) (map[string]
 		"Cosy-Key":              cred.CosyKey,
 		"Cosy-Machineid":        cred.MachineID,
 		"Cosy-User":             cred.UserID,
-		"Cosy-Clientip":         "198.18.0.1",
+		"Cosy-Clientip":         clientIP(cred.MachineID),
 		"Cosy-Clienttype":       "5",
 		"Cosy-Machineos":        MachineOSHeader(),
 		"Cosy-Machinetoken":     "",
@@ -1305,7 +1314,7 @@ func (c *Client) headers(cred Credential, path string, body string) (map[string]
 		"Cosy-Business-Type":    "agent",
 		"Cosy-Scene":            "assistant",
 		"Login-Version":         "v2",
-		"User-Agent":            "lingma-proxy/remote",
+		"User-Agent":            gatewayUserAgent,
 		"Accept":                "text/event-stream",
 		"Cache-Control":         "no-cache",
 	}, nil
@@ -1313,6 +1322,16 @@ func (c *Client) headers(cred Credential, path string, body string) (map[string]
 
 func normalizePath(path string) string {
 	return strings.TrimPrefix(path, "/algo")
+}
+
+// clientIP returns the Cosy-Clientip value. The real CLI sends a UUID here (not
+// an IP); we derive a stable UUID-v4-shaped value from the machine id so the
+// same install presents a consistent client identity across restarts.
+func clientIP(machineID string) string {
+	sum := md5.Sum([]byte("cosy-clientip:" + machineID))
+	sum[6] = (sum[6] & 0x0f) | 0x40 // version 4
+	sum[8] = (sum[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
 type outerSSE struct {
