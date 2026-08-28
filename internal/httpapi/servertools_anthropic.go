@@ -14,7 +14,9 @@ import (
 )
 
 // Server-side tool injection: the proxy advertises gateway-only tools and runs
-// them itself in an agentic loop, never surfacing those calls to the client.
+// them itself in an agentic loop, never surfacing those calls to the client —
+// EXCEPT web_search, which is surfaced as native Anthropic server-tool blocks so
+// clients (e.g. Claude Code) render their built-in "searched the web" UI.
 // Genuine client tools (Bash, etc.) pass through untouched.
 
 const maxMediaToolRounds = 4
@@ -97,6 +99,10 @@ func partitionServerToolCalls(calls []tooltypes.ToolCall) (ours, others []toolty
 	return ours, others
 }
 
+func isWebSearchCall(c tooltypes.ToolCall) bool {
+	return strings.TrimSpace(c.Name) == webSearchToolName
+}
+
 // argBool reads a boolean tool argument, falling back to def when absent (so an
 // omitted flag keeps its default rather than becoming false).
 func argBool(args map[string]any, key string, def bool) bool {
@@ -110,24 +116,8 @@ func argBool(args map[string]any, key string, def bool) bool {
 func (s *Server) executeServerTool(ctx context.Context, call tooltypes.ToolCall) string {
 	switch call.Name {
 	case webSearchToolName:
-		query := strings.TrimSpace(stringFromAny(call.Arguments["query"]))
-		if query == "" {
-			return "Web search failed: empty query"
-		}
-		opts := remote.WebSearchOptions{
-			TimeRange:    strings.TrimSpace(stringFromAny(call.Arguments["timeRange"])),
-			MainText:     argBool(call.Arguments, "mainText", false),
-			MarkdownText: argBool(call.Arguments, "markdownText", false),
-			Summary:      argBool(call.Arguments, "summary", true), // default on: richer than snippet
-		}
-		results, err := s.svc.WebSearch(ctx, query, opts)
-		if err != nil {
-			return "Web search failed: " + err.Error()
-		}
-		if len(results) == 0 {
-			return fmt.Sprintf("No web search results for %q.", query)
-		}
-		return formatWebSearchResults(query, results)
+		_, _, modelText, _ := s.runWebSearch(ctx, call)
+		return modelText
 	case imageSearchToolName:
 		query := strings.TrimSpace(stringFromAny(call.Arguments["query"]))
 		count := 0
@@ -158,8 +148,75 @@ func (s *Server) executeServerTool(ctx context.Context, call tooltypes.ToolCall)
 	return "unknown tool"
 }
 
+// runWebSearch executes one web_search server-tool call ONCE, returning the
+// native web_search_result items (for the client UI), the text form (fed back to
+// the model), and ok=false on a hard error (empty query / API failure).
+func (s *Server) runWebSearch(ctx context.Context, call tooltypes.ToolCall) (query string, items []map[string]any, modelText string, ok bool) {
+	query = strings.TrimSpace(stringFromAny(call.Arguments["query"]))
+	if query == "" {
+		return "", nil, "Web search failed: empty query", false
+	}
+	opts := remote.WebSearchOptions{
+		TimeRange:    strings.TrimSpace(stringFromAny(call.Arguments["timeRange"])),
+		MainText:     argBool(call.Arguments, "mainText", false),
+		MarkdownText: argBool(call.Arguments, "markdownText", false),
+		Summary:      argBool(call.Arguments, "summary", true), // default on: richer than snippet
+	}
+	results, err := s.svc.WebSearch(ctx, query, opts)
+	if err != nil {
+		return query, nil, "Web search failed: " + err.Error(), false
+	}
+	items = make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		item := map[string]any{"type": "web_search_result", "title": strings.TrimSpace(r.Title), "url": strings.TrimSpace(r.Link)}
+		if pt := strings.TrimSpace(r.PublishedTime); pt != "" {
+			item["page_age"] = pt
+		}
+		items = append(items, item)
+	}
+	if len(results) == 0 {
+		modelText = fmt.Sprintf("No web search results for %q.", query)
+	} else {
+		modelText = formatWebSearchResults(query, results)
+	}
+	return query, items, modelText, true
+}
+
+// webSearchResultID reuses the model's tool-call id (matching server_tool_use and
+// web_search_tool_result), synthesizing one only if the model left it empty.
+func webSearchResultID(call tooltypes.ToolCall) string {
+	if id := strings.TrimSpace(call.ID); id != "" {
+		return id
+	}
+	return fmt.Sprintf("srvtoolu_%d", time.Now().UnixNano())
+}
+
+// webSearchBlocks builds the native server_tool_use + web_search_tool_result
+// block pair (non-streaming shape, full input inline).
+func webSearchBlocks(id, query string, items []map[string]any, ok bool) []map[string]any {
+	var content any = items
+	if !ok {
+		content = map[string]any{"type": "web_search_tool_result_error", "error_code": "unavailable"}
+	}
+	return []map[string]any{
+		{"type": "server_tool_use", "id": id, "name": "web_search", "input": map[string]any{"query": query}},
+		{"type": "web_search_tool_result", "tool_use_id": id, "content": content},
+	}
+}
+
+// withWebSearchCount adds usage.server_tool_use.web_search_requests when any
+// web_search ran, matching Anthropic's native usage shape.
+func withWebSearchCount(usage map[string]any, n int) map[string]any {
+	if n > 0 {
+		usage["server_tool_use"] = map[string]any{"web_search_requests": n}
+	}
+	return usage
+}
+
 // foldServerToolResults runs our server tools and formats their results as text
 // to fold into the assistant message at hand-off (the client echoes it back).
+// Used by the OpenAI server-tools path; the Anthropic path surfaces web_search
+// natively and folds only the remaining tools.
 func (s *Server) foldServerToolResults(ctx context.Context, ours []tooltypes.ToolCall) string {
 	var b strings.Builder
 	for _, c := range ours {
@@ -242,6 +299,40 @@ func (s *Server) maybeServeAnthropicServerTools(w http.ResponseWriter, r *http.R
 	return true
 }
 
+// appendToolResultTurn runs our tool calls once and appends the assistant
+// tool_use turn + user tool_result turn so the model can continue. web_search
+// calls also contribute their native block pair (accumulated in searchBlocks),
+// so they are executed exactly once. Returns the grown request and the appended
+// web_search block pairs plus how many web searches ran.
+func (s *Server) appendToolResultTurn(ctx context.Context, req anthropicRequest, result *service.ChatResult, ours []tooltypes.ToolCall, lastRound bool) (anthropicRequest, []map[string]any, int) {
+	assistantContent := make([]any, 0, len(ours)+1)
+	if strings.TrimSpace(result.Text) != "" {
+		assistantContent = append(assistantContent, map[string]any{"type": "text", "text": result.Text})
+	}
+	userContent := make([]any, 0, len(ours))
+	var searchBlocks []map[string]any
+	searches := 0
+	for _, c := range ours {
+		var modelText string
+		if isWebSearchCall(c) {
+			query, items, txt, ok := s.runWebSearch(ctx, c)
+			searchBlocks = append(searchBlocks, webSearchBlocks(webSearchResultID(c), query, items, ok)...)
+			searches++
+			modelText = txt
+		} else {
+			modelText = s.executeServerTool(ctx, c)
+		}
+		assistantContent = append(assistantContent, map[string]any{"type": "tool_use", "id": c.ID, "name": c.Name, "input": c.Arguments})
+		userContent = append(userContent, map[string]any{"type": "tool_result", "tool_use_id": c.ID, "content": modelText})
+	}
+	req.Messages = append(req.Messages, rawMessage{Role: "assistant", Content: assistantContent})
+	req.Messages = append(req.Messages, rawMessage{Role: "user", Content: userContent})
+	if lastRound {
+		req.Tools = stripInjectedServerTools(req.Tools)
+	}
+	return req, searchBlocks, searches
+}
+
 // handleAnthropicServerTools runs the agentic loop that advertises and executes
 // our injected server tools. Tools must already be injected into req by caller.
 func (s *Server) handleAnthropicServerTools(w http.ResponseWriter, r *http.Request, req anthropicRequest) {
@@ -251,6 +342,8 @@ func (s *Server) handleAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 	}
 	ctx := r.Context()
 	var usageAcc serverToolUsage
+	var searchBlocks []map[string]any // native web_search blocks accumulated across rounds
+	webSearchRequests := 0
 	for round := 0; ; round++ {
 		if ctx.Err() != nil {
 			return // client disconnected; stop issuing more rounds / gateway calls
@@ -270,46 +363,36 @@ func (s *Server) handleAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 		ours, others := partitionServerToolCalls(result.ToolCalls)
 		if len(ours) == 0 || len(others) > 0 || round >= maxMediaToolRounds {
 			if len(ours) > 0 {
-				// Fold pending server-tool results into the text; surface only client tools.
-				result.Text = appendText(result.Text, s.foldServerToolResults(ctx, ours))
+				// Surface web_search natively; fold the remaining server tools into text.
+				var folded string
+				for _, c := range ours {
+					if isWebSearchCall(c) {
+						query, items, _, ok := s.runWebSearch(ctx, c)
+						searchBlocks = append(searchBlocks, webSearchBlocks(webSearchResultID(c), query, items, ok)...)
+						webSearchRequests++
+						continue
+					}
+					label := strings.TrimSuffix(c.Name, serverToolSuffix)
+					folded = appendText(folded, fmt.Sprintf("[%s results]\n%s", label, s.executeServerTool(ctx, c)))
+				}
+				result.Text = appendText(result.Text, folded)
 				result.ToolCalls = others
 			}
-			s.emitAnthropicResultJSON(w, normalized, usageAcc.applyTo(result))
+			s.emitAnthropicResultJSON(w, normalized, usageAcc.applyTo(result), searchBlocks, webSearchRequests)
 			return
 		}
-		req = s.appendServerToolTurn(ctx, req, result, ours, round+1 >= maxMediaToolRounds)
+		var rounds []map[string]any
+		var n int
+		req, rounds, n = s.appendToolResultTurn(ctx, req, result, ours, round+1 >= maxMediaToolRounds)
+		searchBlocks = append(searchBlocks, rounds...)
+		webSearchRequests += n
 	}
-}
-
-// appendServerToolTurn appends the assistant tool_use turn and the executed
-// tool_result turn to req, stripping our tools on the last round to force an answer.
-func (s *Server) appendServerToolTurn(ctx context.Context, req anthropicRequest, result *service.ChatResult, ours []tooltypes.ToolCall, lastRound bool) anthropicRequest {
-	assistantContent := make([]any, 0, len(ours)+1)
-	if strings.TrimSpace(result.Text) != "" {
-		assistantContent = append(assistantContent, map[string]any{"type": "text", "text": result.Text})
-	}
-	for _, c := range ours {
-		assistantContent = append(assistantContent, map[string]any{"type": "tool_use", "id": c.ID, "name": c.Name, "input": c.Arguments})
-	}
-	req.Messages = append(req.Messages, rawMessage{Role: "assistant", Content: assistantContent})
-
-	userContent := make([]any, 0, len(ours))
-	for _, c := range ours {
-		userContent = append(userContent, map[string]any{
-			"type":        "tool_result",
-			"tool_use_id": c.ID,
-			"content":     s.executeServerTool(ctx, c),
-		})
-	}
-	req.Messages = append(req.Messages, rawMessage{Role: "user", Content: userContent})
-	if lastRound {
-		req.Tools = stripInjectedServerTools(req.Tools)
-	}
-	return req
 }
 
 // streamAnthropicServerTools streams the agentic loop as one Anthropic message:
 // deltas flow live, our tool calls run server-side, continuation stays in-message.
+// web_search calls stream as native server_tool_use + web_search_tool_result
+// blocks; other server tools stay hidden (only fed back to the model).
 func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Request, req anthropicRequest) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -333,6 +416,7 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 
 	index := 0
 	var usageAcc serverToolUsage
+	webSearchRequests := 0
 	blockStart := func(block map[string]any) {
 		_ = writeSSEEvent(w, flusher, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": block})
 	}
@@ -343,6 +427,28 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 		_ = writeSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 		index++
 	}
+	// emitWebSearch runs one web_search call and streams it as native server-tool
+	// blocks, returning the text form to feed back to the model.
+	emitWebSearch := func(call tooltypes.ToolCall) string {
+		query, items, modelText, ok := s.runWebSearch(ctx, call)
+		id := webSearchResultID(call)
+		input, _ := json.Marshal(map[string]any{"query": query})
+		blockStart(map[string]any{"type": "server_tool_use", "id": id, "name": "web_search", "input": map[string]any{}})
+		blockDelta(map[string]any{"type": "input_json_delta", "partial_json": string(input)})
+		blockStop()
+		var content any = items
+		if !ok {
+			content = map[string]any{"type": "web_search_tool_result_error", "error_code": "unavailable"}
+		}
+		blockStart(map[string]any{"type": "web_search_tool_result", "tool_use_id": id, "content": content})
+		blockStop()
+		webSearchRequests++
+		return modelText
+	}
+	endStream := func(result *service.ChatResult, stopReason string, stopSequence any) {
+		_ = writeSSEEvent(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason, "stop_sequence": stopSequence}, "usage": withWebSearchCount(anthropicFinalUsage(result), webSearchRequests)})
+		_ = writeSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+	}
 
 	for round := 0; ; round++ {
 		if ctx.Err() != nil {
@@ -350,8 +456,7 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 		}
 		normalized, err := normalizeAnthropicRequest(req)
 		if err != nil {
-			_ = writeSSEEvent(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil}, "usage": anthropicFinalUsage(usageAcc.result())})
-			_ = writeSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			endStream(usageAcc.result(), "end_turn", nil)
 			return
 		}
 		s.applyDefaultModel(&normalized)
@@ -359,8 +464,7 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 
 		events, done, err := s.svc.GenerateStream(ctx, normalized)
 		if err != nil {
-			_ = writeSSEEvent(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil}, "usage": anthropicFinalUsage(usageAcc.result())})
-			_ = writeSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			endStream(usageAcc.result(), "end_turn", nil)
 			return
 		}
 
@@ -417,8 +521,7 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 
 		res := <-done
 		if res.Err != nil || res.Result == nil {
-			_ = writeSSEEvent(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil}, "usage": anthropicFinalUsage(usageAcc.result())})
-			_ = writeSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			endStream(usageAcc.result(), "end_turn", nil)
 			return
 		}
 		result := res.Result
@@ -426,11 +529,23 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 		ours, others := partitionServerToolCalls(result.ToolCalls)
 
 		if len(ours) == 0 || len(others) > 0 || round >= maxMediaToolRounds {
-			// Finalize: fold pending server-tool results into text, then surface client tools.
+			// Finalize: surface web_search natively, fold remaining server tools to text.
 			if len(ours) > 0 {
-				if folded := s.foldServerToolResults(ctx, ours); folded != "" {
+				var folded strings.Builder
+				for _, c := range ours {
+					if isWebSearchCall(c) {
+						emitWebSearch(c)
+						continue
+					}
+					label := strings.TrimSuffix(c.Name, serverToolSuffix)
+					if folded.Len() > 0 {
+						folded.WriteString("\n\n")
+					}
+					fmt.Fprintf(&folded, "[%s results]\n%s", label, s.executeServerTool(ctx, c))
+				}
+				if folded.Len() > 0 {
 					blockStart(map[string]any{"type": "text", "text": ""})
-					blockDelta(map[string]any{"type": "text_delta", "text": folded})
+					blockDelta(map[string]any{"type": "text_delta", "text": folded.String()})
 					blockStop()
 				}
 				result.ToolCalls = others
@@ -442,20 +557,41 @@ func (s *Server) streamAnthropicServerTools(w http.ResponseWriter, r *http.Reque
 				blockStop()
 			}
 			stopReason, stopSequence := anthropicStopReason(result)
-			_ = writeSSEEvent(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason, "stop_sequence": stopSequence}, "usage": anthropicFinalUsage(usageAcc.result())})
-			_ = writeSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			endStream(usageAcc.result(), stopReason, stopSequence)
 			return
 		}
 		// Execute our tools server-side and continue the same message next round.
-		req = s.appendServerToolTurn(ctx, req, result, ours, round+1 >= maxMediaToolRounds)
+		// web_search streams as native blocks now; the rest are fed back silently.
+		assistantContent := make([]any, 0, len(ours)+1)
+		if strings.TrimSpace(result.Text) != "" {
+			assistantContent = append(assistantContent, map[string]any{"type": "text", "text": result.Text})
+		}
+		userContent := make([]any, 0, len(ours))
+		for _, c := range ours {
+			var modelText string
+			if isWebSearchCall(c) {
+				modelText = emitWebSearch(c)
+			} else {
+				modelText = s.executeServerTool(ctx, c)
+			}
+			assistantContent = append(assistantContent, map[string]any{"type": "tool_use", "id": c.ID, "name": c.Name, "input": c.Arguments})
+			userContent = append(userContent, map[string]any{"type": "tool_result", "tool_use_id": c.ID, "content": modelText})
+		}
+		req.Messages = append(req.Messages, rawMessage{Role: "assistant", Content: assistantContent})
+		req.Messages = append(req.Messages, rawMessage{Role: "user", Content: userContent})
+		if round+1 >= maxMediaToolRounds {
+			req.Tools = stripInjectedServerTools(req.Tools)
+		}
 	}
 }
 
-func (s *Server) emitAnthropicResultJSON(w http.ResponseWriter, req service.ChatRequest, result *service.ChatResult) {
-	content := make([]map[string]any, 0, 2+len(result.ToolCalls))
+func (s *Server) emitAnthropicResultJSON(w http.ResponseWriter, req service.ChatRequest, result *service.ChatResult, searchBlocks []map[string]any, webSearchRequests int) {
+	content := make([]map[string]any, 0, 2+len(searchBlocks)+len(result.ToolCalls))
 	if shouldEmitAnthropicThinking(req, result) {
 		content = append(content, map[string]any{"type": "thinking", "thinking": result.ThoughtText})
 	}
+	// Native web_search server-tool blocks (from any round) precede the answer.
+	content = append(content, searchBlocks...)
 	if strings.TrimSpace(result.Text) != "" {
 		content = append(content, map[string]any{"type": "text", "text": result.Text})
 	}
@@ -483,6 +619,6 @@ func (s *Server) emitAnthropicResultJSON(w http.ResponseWriter, req service.Chat
 		"content":       content,
 		"stop_reason":   stopReason,
 		"stop_sequence": stopSequence,
-		"usage":         anthropicFinalUsage(result),
+		"usage":         withWebSearchCount(anthropicFinalUsage(result), webSearchRequests),
 	})
 }

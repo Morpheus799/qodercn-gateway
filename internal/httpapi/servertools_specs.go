@@ -25,12 +25,15 @@ const textPolishToolDescription = `Polish raw or unpunctuated text: add correct 
 Ideal for cleaning up speech-to-text transcriptions, rough dictation, or messy pasted text before using it.
 Returns only the cleaned text. It does NOT rewrite, summarize, translate, or answer the content.`
 
-// serverToolSuffix namespaces our server-tool names so a client tool with the
-// same base name (e.g. "web_search") can never collide with ours.
+// serverToolSuffix namespaces our injected tool names so a client tool with the
+// same base name can never collide with ours.
 const serverToolSuffix = "__lmproxy"
 
 const (
-	webSearchToolName   = "web_search" + serverToolSuffix
+	// web_search keeps its natural name (no suffix): we fully strip+replace the
+	// client's hosted web_search, and the model reliably calls it by this name
+	// (the suffix made it flakily emit a bare "web_search" tool call instead).
+	webSearchToolName   = "web_search"
 	imageSearchToolName = "ImageSearch" + serverToolSuffix
 	textPolishToolName  = "TextPolish" + serverToolSuffix
 )
